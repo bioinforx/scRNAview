@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 appEnvName="scRNAview"
-appEnvPrefix="/share/oyoung/dev/condaEnv"
+#appEnvPrefix=""
 
 ## input check
 if [[ -z $appEnvName ]]; then echo "Missing appEnvName!";exit; fi
