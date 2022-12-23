@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+appEnvName="scRNAview"
+appEnvPrefix="/share/oyoung/dev/condaEnv"
+
+## input check
+if [[ -z $appEnvName ]]; then echo "Missing appEnvName!";exit; fi
+## check the conda availability
+condaPath=$(which conda)
+if [[ ${#condaPath} -lt 3 ]]; then
+    echo "Missing conda"
+    echo "Please install conda and add it into PATH"
+    exit
+else
+    echo "conda in $condaPath"
+fi
+condaPath=$(dirname $(dirname $condaPath))
+if [[ -z $appEnvPrefix ]]; then appEnvPrefix=$condaPath/envs; fi
+appEnvName=$(dirname $appEnvPrefix/a)/$appEnvName
+echo "conda env: $appEnvName"
+
+## create conda env
+if { conda env list | grep "$appEnvName"; } &>/dev/null; then conda env remove -p $appEnvName; fi
+conda create -y "python=3.8.15" "mamba=1.1.0" "git=2.39.0" "jq=1.6" -c conda-forge -p $appEnvName
+echo -e "#!/usr/bin/env bash\nsource $condaPath/etc/profile.d/conda.sh\nconda activate $appEnvName" > $(basename $appEnvName)
+chmod a+x $(basename $appEnvName)
+
+## config the env with cellxgene
+source $(basename $appEnvName)
+git clone https://github.com/chanzuckerberg/cellxgene.git
+cd cellxgene
+git checkout f48d06fb9043771d7370ee9ac0dc9de8ae6ad888 # v1.1.1
+
+## update the client-side source code of cellxgene for VIP
+echo -e "\nwindow.store = store;" >> client/src/reducers/index.js
+sed -i "s|<div id=\"root\"></div>|$(sed -e 's/[&\\/]/\\&/g; s/|/\\|/g; s/$/\\/;' -e '$s/\\$//' ../packages/index_template.insert)\n&|" "client/index_template.html"
+sed -i "s|logoRelatedPadding = 50|logoRelatedPadding = 60|" "client/src/components/leftSidebar/index.js"
+## update the cellxgene title to cellxgene VIP
+sed -i "s|title=\"cellxgene\"|title=\"cellxgene VIP\"|" "client/src/components/app.js"
+## modify zoom/pan default
+sed -i "s|const *scaleMax *= *[0-9\.]\+|const scaleMax = 50000|; s|const *scaleMin *= *[0-9\.]\+|const scaleMin = 0.1|; s|const *panBound *= *[0-9\.]\+|const panBound = 80|" "client/src/util/camera.js"
+
+## update the server-side source code of cellxgene for VIP
+echo '
+from server.app.VIPInterface import route
+@webbp.route("/VIP", methods=["POST"])
+def VIP():
+    return route(request.data,current_app.app_config)' >> server/app/app.py
+## install cellxgene
+make pydist
+make install-dist
+
+## update the packages
+cd ..
+echo -e "#!/usr/bin/env bash\nsource $condaPath/etc/profile.d/conda.sh\nconda activate $appEnvName" > update
+echo '
+strPath=$(python -c "import site; print(site.getsitepackages()[0])")
+strweb=${strPath}/server/common/web/static/.
+
+cp packages/interface.html $strPath/server/app/.
+cp packages/VIPInterface.py $strweb
+cp packages/*R $strPath/server/app/.
+' >> update
+chmod a+x update
+source update
+mamba env update -f packages/conda.env.yml
+
+
